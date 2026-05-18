@@ -6,15 +6,9 @@ FORGE structures your Claude Code sessions into a multi-agent pipeline with plan
 
 ---
 
-## The glass wall
+## The bet
 
-When you submit a prompt to a plain AI tool, work disappears into a black box. You get a result. You don't know what decisions were made, what was considered and rejected, or why the output looks the way it does. If something is wrong you can't trace it.
-
-FORGE is built on the opposite premise. The terminal is a live window into the work as it happens. You watch the planner reason through your feature. You watch the researcher investigate an unknown. You watch reviewer-safety raise a concern and the coder revise its approach in response. Every decision is visible as it streams.
-
-Think of a restaurant with a glass-wall kitchen. You talk to the waiter — the interface that guides you, asks clarifying questions, and carries your request to the kitchen. The chefs are the specialist agents doing the work. You may not understand every technique, but you can see everything happening in real time. By the time your feature arrives — planned, reviewed, implemented, documented — you watched it being made.
-
-Gates are the formal control points. The terminal is the continuous one.
+The model can't be trusted to follow instructions when the instructions are inconvenient. So FORGE pushes leverage to the layer below the model — PreToolUse hooks that block bad actions, a pure-function classifier that routes reviewers without another LLM, and an approve token that only unlocks on typed user input (sanitized of injected context). The plan → implement → apply pipeline runs on top of that floor, with two human gates and policy enforced at the harness level rather than the prompt level.
 
 ---
 
@@ -28,12 +22,12 @@ Gates are the formal control points. The terminal is the continuous one.
 
 /forge:implement
     → coder writes implementation to handoff.md
-    → reviewers check: safety, logic, style, performance
+    → reviewers check: safety, logic, boundary, performance, tests
     → Gate #2: you read the verdicts and approve
 
 /forge:apply
-    → implementer applies changes to source files
     → documenter updates changelog and architecture docs
+    → commit gate appears for worktree merge
 ```
 
 No code touches your project until you approve Gate #2.
@@ -61,7 +55,7 @@ Read the plan. If it looks right, approve. If something is off, discard and re-p
 ```
 /forge:implement
 ```
-The coder writes the implementation to a handoff document. Five specialist reviewers check it — safety, logic, style, performance, and boundary correctness — and emit verdicts. When they finish, Gate #2 appears with the implementation summary and all reviewer verdicts.
+The coder writes the implementation to a handoff document. Five specialist reviewers check it — safety, logic, boundary, performance, and tests — and emit verdicts. When they finish, Gate #2 appears with the implementation summary and all reviewer verdicts.
 
 **4. Approve or discard the implementation**
 ```
@@ -74,9 +68,9 @@ Read the verdicts. If anything is blocked, the pipeline won't let you approve un
 ```
 /forge:apply
 ```
-The implementer writes the changes to your actual source files. The documenter updates the changelog and architecture docs. Done.
+The documenter writes the changelog and architecture-doc updates in the worktree. The worker pauses at a commit gate, and approving it merges the worktree into your main branch. Done.
 
-Your project files are never touched until step 5.
+No changes land on your main branch until step 5.
 
 ---
 
@@ -84,11 +78,11 @@ Your project files are never touched until step 5.
 
 Five things happen when you install FORGE and start a session:
 
-- **29 specialist agents** are loaded from the plugin — each is a Claude instance with a defined role, tool access, and model assignment
-- **13 hook scripts** fire on lifecycle events (session start, tool calls, subagent start/stop) to enforce rules and inject context
-- **An MCP server** starts alongside your session and provides 24 tools for structured access to pipeline state, gates, and model routing
+- **21 specialist agents** are loaded from the plugin — each is a Claude instance with a defined role, tool access, and model assignment
+- **31 hook scripts** fire on 10 lifecycle events (session start, prompt submit, tool calls, subagent start/stop, and more) to enforce rules and inject context
+- **An MCP server** starts alongside your session and provides 39 tools for structured access to pipeline state, gates, and model routing
 - **All state lives in `.pipeline/`** in your project directory — board, run history, pending gates, config — nothing is sent anywhere else
-- **Anthropic models route via agent frontmatter**; external models (Gemini, OpenAI) route via the MCP server's `forge_call_external` tool
+- **All agents route to Anthropic models** via frontmatter; external-provider routing exists via the MCP server's `forge_call_external` tool for future expansion
 
 Nothing runs in the background between sessions. FORGE is stateless until you invoke a command.
 
@@ -99,7 +93,7 @@ Nothing runs in the background between sessions. FORGE is stateless until you in
 Clone the internal repo, then start Claude Code with the plugin loaded:
 
 ```bash
-git clone <INTERNAL-GITHUB-URL>
+git clone https://github.com/Chulf58/FORGE.git
 claude --plugin-dir /path/to/forge-plugin
 ```
 
@@ -157,23 +151,17 @@ You see the implementation summary and all reviewer verdicts. `/forge:approve` m
 
 ## What's included
 
-- **29 specialist agents** — planner, researcher, coder, 5 reviewers (safety, logic, style, performance, boundary correctness), implementer, documenter, architect, critic, and more
-- **21 skills** — slash commands that orchestrate agents into pipelines
-- **13 hook scripts** across 7 lifecycle events — enforcement, context injection, board hygiene
-- **24 MCP tools** — structured access to pipeline state, board, gates, model routing, and dashboard
-- **Multi-model routing** — per-agent model selection with Anthropic and Gemini support; the Gemini-backed supervisor agent produces implementation briefs from outside the Claude model family
-
----
-
-## What's coming
-
-A native TUI dashboard for monitoring pipelines without leaving the terminal and improved worktree-based parallel execution are in active development.
+- **21 specialist agents** — planner, researcher, coder, 5 reviewers (safety, logic, boundary, performance, tests), documenter, architect, critic, and more
+- **29 skills** — slash commands that orchestrate agents into pipelines
+- **31 hook scripts** across 10 lifecycle events — enforcement, context injection, board hygiene
+- **39 MCP tools** — structured access to pipeline state, board, gates, model routing, and dashboard
+- **Multi-model routing** — per-agent model selection across Anthropic models (sonnet for coder/planner/architect, haiku for reviewers, opus for critic). External-provider routing exists via `forge_call_external` for future expansion.
 
 ---
 
 ## Docs
 
-- [FORGE-OVERVIEW.md](docs/FORGE-OVERVIEW.md) — what FORGE is, the glass wall principle, comparison with similar tools
+- [FORGE-OVERVIEW.md](docs/FORGE-OVERVIEW.md) — what FORGE is, design principles, comparison with similar tools
 - [FORGE-REFERENCE.md](docs/FORGE-REFERENCE.md) — full agent tables, signal protocol, hook system, MCP tools, model routing
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — module map and key file locations
 
