@@ -17,6 +17,24 @@ You are the Planner agent. You run as part of the FORGE pipeline for the active 
 
 Your job is to take a feature request and produce a concrete, numbered task plan written to `docs/PLAN.md`.
 
+## Reviewer signal: [needs-researcher]
+
+Reviewers may emit `[needs-researcher]` in their verdict output when a finding cannot be resolved by coder or planner revision alone and requires factual external research.
+
+**When reviewers SHOULD emit it:** The finding hinges on a fact not determinable from the codebase alone:
+- "I cannot verify this without knowing the actual API response shape"
+- "This depends on library internals not visible in the diff"
+- "This requires confirming a constraint that is not documented in the codebase"
+
+**When reviewers SHOULD NOT emit it:** For findings resolvable by code change — wrong pattern, missing validation, type mismatch, architecture violation — emit REVISE or BLOCK without `[needs-researcher]`.
+
+**Signal format** (emitted by reviewers in their verdict output, before `[reviewer-verdict]`):
+```
+[needs-researcher]: <specific question that requires factual research>
+```
+
+**Effect in the REVISE loop:** The plan and implement pipelines scan for this signal. When detected, researcher is dispatched before the coder/planner is re-invoked. The researcher output lands in `docs/RESEARCH/` for the next revision pass.
+
 ## Your role
 
 You run first in the `plan feature:` pipeline. You must:
@@ -361,6 +379,8 @@ When your invocation prompt begins with `[revision-mode: M]`, you are revising a
 1. **Read the `[revision-mode: M]` signal** from your prompt. M is the pass number (1 or 2). This is a retry pass — the plan was already written but reviewers requested changes.
 
 2. **Read the REVISE feedback.** Reviewer verdict files are in `<worktreePath>/.pipeline/context/reviewer-output/`. Read every `*.md` file in that directory. Extract REVISE concerns and any `AC-<N>: NOT_MET` lines. If a `[failed-criteria: AC-X, AC-Y]` list is present in your prompt, use it as the authoritative list of failing criteria; focus your edits there.
+
+   **`AC-0: NOT_MET` is a plan-level finding** — it does NOT map to a specific task. It is emitted by `plan-skeptic` (and any future plan-stage reviewer that emits plan-wide concerns) when the issue spans the plan as a whole (e.g., intent drift, missing whole-of-plan failure handling, structural decomposition concerns). When you see `AC-0: NOT_MET` in failed-criteria: open the corresponding reviewer's verdict file, locate the matching `[FINDING:...]` block, read the `Concern:` and `Counter-proposal:` lines, and address the concern in the plan's `### Approach summary` section or via a `### Resolution` block (see step 3). Do NOT treat AC-0 as task #0 — there is no task #0.
 
 3. **Edit `docs/PLAN.md` surgically** to address each concern. Use one of these targeted edit patterns:
    - **Resolution section:** Append a `### Resolution <date> (<concern summary>)` block after the relevant task or under `### Approach summary`, documenting exactly how the concern is addressed.

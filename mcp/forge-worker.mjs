@@ -20,6 +20,9 @@ const BUDGET_AUTOCOMPACT_FACTOR = 0.835; // mirrors ctx-session-start.js
 const BUDGET_DEBOUNCE_MS = 30_000;      // write bridge at most once per 30 s per agent
 
 const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+// Path to CLAUDE-WORKER.md — supplies explicit worker system prompt to query().
+// Defined at module level so it is resolved once at startup and shared by query().
+const CLAUDE_WORKER_PATH = join(pluginRoot, 'CLAUDE-WORKER.md');
 
 /**
  * Mirrors mcp/server.js resolveMainProjectDir logic.
@@ -195,9 +198,12 @@ async function main() {
   function resetWorkerTimer(timeoutMs = WORKER_TIMEOUT_MS) {
     clearTimeout(workerTimer);
     workerTimedOut = false;
+    const setAt = Date.now();
+    writeLog('[forge-worker] [timer-reset] timeoutMs=' + timeoutMs + ' set-at=' + setAt);
     workerTimer = setTimeout(() => {
       workerTimedOut = true;
-      writeLog('[forge-worker] timeout reached (' + timeoutMs + ' ms) — aborting');
+      const elapsed = Date.now() - setAt;
+      writeLog('[forge-worker] timeout reached (' + timeoutMs + ' ms) — aborting elapsed-since-set=' + elapsed);
     }, timeoutMs);
     workerTimer.unref();
   }
@@ -378,6 +384,16 @@ async function main() {
         persistSession: true,
         maxTurns: 200,
         permissionMode: 'bypassPermissions',
+        // Disable automatic CLAUDE.md loading so neither the worktree CLAUDE.md
+        // nor any parent-directory CLAUDE.md leaks conductor instructions into the
+        // worker session. settingSources: [] is the only way to suppress CLAUDE.md
+        // injection — systemPrompt alone does not prevent it (they are orthogonal).
+        settingSources: [],
+        // Supply CLAUDE-WORKER.md explicitly as the worker system prompt.
+        // This is robust to both root-cause hypotheses (swap failure OR external
+        // CLAUDE.md leak) — regardless of which path brings the wrong content,
+        // settingSources: [] suppresses it and systemPrompt provides the correct one.
+        systemPrompt: readFileSync(CLAUDE_WORKER_PATH, 'utf-8'),
         plugins: [{ type: 'local', path: pluginRoot }],
         mcpServers: {
           'forge-pipeline': buildInProcessMcpServer(workDir),
@@ -386,6 +402,7 @@ async function main() {
     });
 
     let gateHandled = false;
+    let gateFileConsumed = false; // set after consumeGateApproval to block re-entry on stale run.json
 
     // Checkpoint re-dispatch tracking. Keyed by normalized agent type.
     // Cap: 2 re-dispatches per agent type per worker lifetime (= per run).
@@ -736,12 +753,13 @@ async function main() {
         }
       }
 
-      if (gateHandled) continue;
+      if (gateHandled || gateFileConsumed) continue;
 
       const runData = readRunData();
       if (runData && runData.status === 'gate-pending' &&
           runData.gateState && runData.gateState.status === 'pending') {
         gateHandled = true;
+        gateFileConsumed = false; // entering a new gate — reset consumed flag
         // Use GATE_POLL_TIMEOUT_MS (6 h default) so human review time does not
         // count against the active-worker budget (WORKER_TIMEOUT_MS = 60 min).
         resetWorkerTimer(GATE_POLL_TIMEOUT_MS);
@@ -771,6 +789,7 @@ async function main() {
 
         if (decision === 'approved') {
           gateHandled = false; // allow detecting the next gate after resuming
+          gateFileConsumed = true; // block re-entry on stale run.json until conductor writes fresh status
           const resumeMsg = gateName === 'gate2'
             ? 'Gate 2 approved. Continue with /forge:apply steps in this session: run documenter, lifecycle cleanup, then write a commit gate.'
             : 'approved';

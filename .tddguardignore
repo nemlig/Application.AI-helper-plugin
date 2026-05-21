@@ -41,3 +41,13 @@ scripts/test-observer-autosplit.mjs
 # exits 1 (Test 6 fails). Test file lives in scripts/ not adjacent to hooks/,
 # so resolveTestFile cannot locate it. Red bar manually verified before this entry.
 hooks/observer-autosplit.js
+# researcher-exempt wave 2 — red bar confirmed: node scripts/run-tests.mjs exits 1,
+# 'exits 0 for researcher (exempt)' fails with actual=2, expected=0.
+# Test file is hooks/agent-loop-guard-test.mjs (hyphen convention);
+# tdd-guard resolveTestFile only detects .test.mjs convention.
+hooks/agent-loop-guard.js
+# c62ac8af rectified inline fix 2026-05-21 — red bar confirmed: node --test
+# scripts/archived-agent-cleanup-test.mjs exits 1, 6/6 tests failing
+# (including 'hook-utils.js has no _archived branch'). Test file lives in
+# scripts/ so tdd-guard resolveTestFile cannot locate it.
+hooks/hook-utils.js

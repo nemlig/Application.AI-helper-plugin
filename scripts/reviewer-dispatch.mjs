@@ -264,6 +264,14 @@ function dispatchForPlanStage(planContent) {
   const reviewerSet = new Set();
   const reasons = [];
 
+  // plan-skeptic ALWAYS runs at plan stage — semantic critic complements the
+  // structural gotcha-checker. Token cost (~$0.10–$0.20 per Opus run) is the
+  // budget trade for catching intent drift, AC misalignment, and over-engineering
+  // before implementation. The agent itself handles small-plan cases via its
+  // ≥1-bullet-for-1-2-task-plans Clear rule — no dispatch-level gating needed.
+  reviewerSet.add('plan-skeptic');
+  reasons.push('plan-stage: plan-skeptic always runs (semantic critic)');
+
   for (const [reviewer, keywords] of Object.entries(PLAN_REVIEWER_KEYWORDS)) {
     for (const keyword of keywords) {
       if (taskLines.some((line) => line.includes(keyword))) {
@@ -462,8 +470,18 @@ if (isMainModule()) {
 
   // Apply reviewerOverrides bypass on handoff/plan path too (task 2 + task 3)
   if (reviewerOverrides !== null) {
+    // At plan stage, plan-skeptic is non-negotiable — always include it regardless of
+    // reviewerOverrides. The override mechanism locks in the conductor-approved reviewer
+    // team, but plan-skeptic's cross-model critique is a pipeline invariant at plan stage
+    // that must not be dropped by a pre-run classification that didn't account for it.
+    // Bug: reviewerOverrides was set from forge_classify_risk at pre-run time, before
+    // plan-skeptic was added to dispatchForPlanStage — so it was never in the approved list.
+    const effectiveOverrides = (stage === 'plan' && !reviewerOverrides.includes('plan-skeptic'))
+      ? [...reviewerOverrides, 'plan-skeptic'].sort()
+      : reviewerOverrides;
+
     for (const classifiedReviewer of classifiedFallbackResult.reviewers) {
-      if (!reviewerOverrides.includes(classifiedReviewer)) {
+      if (!effectiveOverrides.includes(classifiedReviewer)) {
         const triggeringRule = classifiedFallbackResult.reasons
           ? classifiedFallbackResult.reasons.find((r) => r.includes(classifiedReviewer))
           : null;
@@ -476,7 +494,7 @@ if (isMainModule()) {
       }
     }
     const overrideResult = {
-      reviewers: reviewerOverrides,
+      reviewers: effectiveOverrides,
       reasons: ['reviewerOverrides-from-run'],
       classifiedBy: classifiedFallbackResult.classifiedBy || 'handoff',
     };

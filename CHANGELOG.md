@@ -1,5 +1,61 @@
 # Changelog
 
+## [2026-05-21] Promote coder-scout + completeness-checker; delete dead archived agents (TODO c62ac8af)
+
+- Promoted `agents/coder-scout.md` and `agents/completeness-checker.md` from `agents/_archived/` to top-level — these were misplaced; both are referenced as default implement-stage agents per `skills/implement/SKILL.md`
+- Deleted 9 truly-dead archived agents: agent-optimizer, cleanup, implementer-triage, integrity-checker, regression-risk, researcher-triage, reviewer-style, reviewer-triage, tool-call-auditor
+- Removed now-empty `agents/_archived/` directory
+- Removed dead `_archived` fallback branch from `hooks/hook-utils.js:161-171`
+- Added `.pipeline/agent-roles.json` entries for coder-scout (allowedPaths) and completeness-checker (readonly:true); cleaned up 6 stale entries for deleted agents
+- Bumped plugin version 0.5.11 → 0.5.12 so plugin cache picks up the changes on next `/plugin` + `/reload-plugins`
+- New regression test `scripts/archived-agent-cleanup-test.mjs` (6 assertions; red bar verified before fix, green bar verified after; regression suite 78/78 pass)
+- Root cause: the worker LLM dispatching `forge:_archived:coder-scout` (witnessed r-e82c8161:588) was NOT drift — it was correctly resolving the only available coder-scout. The bug was a placement issue, not an exposure issue. Took 3 attempts to diagnose correctly (r-f107f3ea + r-2537968e both discarded with wrong fix direction).
+
+## [2026-05-21] Fix 60-min WORKER_TIMEOUT_MS reset-after-approval bug (TODO a484a9b2)
+
+- Fixed gate-block re-entry race in `mcp/forge-worker.mjs` that cancelled the fresh 60-min timer set on gate2 approval — after approval, `gateHandled = false` allowed the next for-await iteration to re-enter the gate-detection block on a stale `run.json` read and call `resetWorkerTimer(GATE_POLL_TIMEOUT_MS)`, replacing the fresh 60-min timer with a 6h gate-poll timer
+- Added `gateFileConsumed` boolean guard: set to `true` after `consumeGateApproval()`; checked alongside `gateHandled` in the loop continue condition; reset to `false` when a new gate is first detected — blocks re-entry regardless of `run.json` staleness
+- Added `[timer-reset]` diagnostic logging to `resetWorkerTimer` with `set-at` epoch ms and `elapsed-since-set` in the fired-callback log line — enables post-mortem verification that the 60-min budget was actually delivered
+- Added `mcp/forge-worker-reset-reproducer.mjs` — self-contained TDD reproducer (no forge-worker.mjs import) with injectable fake timer controller; confirms red→green TDD cycle for the cancellation-by-overwrite scenario
+- TDD: Phase 1 red bar confirmed (overwrite cancels 60-min callback → `AssertionError`); Phase 2 green bar confirmed (exit 0); all existing timeout tests pass unmodified
+
+## [2026-05-20] Auto-capture learnings post-apply (Gap 2)
+
+- Added `agents/learnings-extractor.md` — deterministic post-apply agent that captures outcome-keyed learnings to `docs/solutions/` (approved/blocked/debug_resolved branches)
+- Wired into `skills/apply/SKILL.md` Step 3.4a between documenter (3.3) and post-apply lifecycle (3.4b)
+- Non-blocking on failure; mainProjectRoot-targeted; honors `detectConflict` to skip near-duplicates; sanitizes user-supplied strings before YAML/markdown injection
+- Phase-split TDD: failing tests (Phase 1) → implementation (Phase 2) → regression green (Phase 3)
+- Note: apply documenter did not write this entry at merge time (60-min safety valve killed the apply worker — TODO a484a9b2); backfilled manually
+
+## [2026-05-20] Fix reviewer-dispatch plan-skeptic invariant
+
+- Fixed `reviewerOverrides` bypass in `scripts/reviewer-dispatch.mjs` dropping `plan-skeptic` from plan-stage dispatch
+- Added `effectiveOverrides` logic to inject `plan-skeptic` unconditionally at plan stage when absent from overrides
+- Added 4 regression tests in `scripts/reviewer-dispatch.test.mjs` covering the fix and boundary cases
+
+## [2026-05-20] Plugin cache npm install bug — option 4 cache-repair (TODO 897edb7e)
+
+- Added `scanCacheVersions(cacheBaseDir, opts)` to `hooks/mcp-deps-install.js` — at SessionStart, scans all plugin cache version dirs and repairs any with missing `mcp/node_modules`
+- SDK (`@anthropic-ai/claude-agent-sdk`) is copied from a healthy donor version via `copyDirSync` — never npm-installed, preserving the documented safe-fix pattern
+- Remaining missing direct deps installed via `npm ci`/`npm install` per existing pattern
+- Two guards: (a) `FORGE_WORKER_RUN_ID` env check — skip in worker sessions; (b) `_scanRanThisSession` module-level flag — once-per-Claude-session dedup so SessionStart re-fires (resume, compact) don't burn N scans
+- Fail-open at every level — hook never throws, logs and continues on any error
+- TDD wave structure: red bar in `hooks/mcp-deps-install-cache-repair-test.js` (4 tests) verified before implementation; green bar after; positive-copy test asserts SDK copied without npm invocation
+
+## [2026-05-20] Conflict-detect in forge_add_learning (Gap 4c)
+
+- Added `detectConflict(projectDir, { type, title, tags })` to `mcp/lib/knowledge-store.js` — returns `{ slug, title }` when a near-duplicate exists, null otherwise
+- Solution path: keyword overlap ≥ 50% (incoming-denominator) OR ≥ 2 tag matches → conflict
+- Gotcha path: `matchCount ≥ 2 AND matchCount ≥ Math.ceil(0.4 × N)` against GENERAL.md sections; fail-open on missing files or empty keywords
+- Wired into `forge_add_learning` handler (`mcp/lib/tools/knowledge.js`) for both `solution` and `gotcha` types — returns `{ conflict: true, slug, title }` as a MCP-valid textResult before writing
+- TDD: 8 unit tests in `mcp/lib/knowledge-store-conflict.test.mjs` + 2 integration tests extended in `mcp/lib/tools/knowledge.test.mjs`
+
+## [2026-05-20] Add verifiedAt timestamp to forge_add_learning entries
+
+- Added `verifiedAt: new Date().toISOString()` to `newEntry` in `appendSolutionDoc` (`mcp/lib/knowledge-store.js`) — every solution and gotcha index entry now carries an ISO 8601 write timestamp
+- Added test 4 in `mcp/lib/tools/knowledge-test.mjs` asserting the field is present and matches the ISO 8601 pattern; existing tests 4–6 renumbered 5–7
+- Added `mcp/lib/knowledge-store.test.mjs` — standalone node:test unit test for `appendSolutionDoc`
+
 ## [2026-05-17] Notes-knowledge bidirectional link
 
 - Added `knowledgeRefs` to notes and `sourceNotes` to knowledge index entries for bidirectional linking
